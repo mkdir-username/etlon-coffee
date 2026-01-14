@@ -1,3 +1,5 @@
+import logging
+
 from aiogram import Router, F
 from aiogram.filters import CommandStart
 from aiogram.types import Message, CallbackQuery
@@ -13,6 +15,7 @@ from bot.keyboards import (
     confirm_keyboard,
 )
 
+logger = logging.getLogger(__name__)
 
 router = Router(name="client")
 
@@ -257,6 +260,8 @@ async def confirm_order(callback: CallbackQuery, state: FSMContext) -> None:
         items=items,
         pickup_time=pickup_time
     )
+
+    logger.info(f"[Order] #{order.id} создан: user={user.id}, total={order.total}")
 
     await state.clear()
 

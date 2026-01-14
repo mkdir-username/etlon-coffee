@@ -3,11 +3,13 @@
 Запустить один раз перед первым запуском бота:
     python init_db.py
 """
+import json
 import sqlite3
 from pathlib import Path
 
 
 DB_PATH = Path(__file__).parent / "etlon.db"
+MENU_JSON = Path(__file__).parent / "data" / "menu.json"
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS menu_items (
@@ -29,42 +31,34 @@ CREATE TABLE IF NOT EXISTS orders (
 );
 """
 
-# Стандартное меню кофейни
-MENU_ITEMS = [
-    ("Эспрессо", 150),
-    ("Американо", 180),
-    ("Капучино", 250),
-    ("Латте", 280),
-    ("Флэт Уайт", 300),
-    ("Раф", 320),
-    ("Какао", 220),
-    ("Чай чёрный", 150),
-    ("Чай зелёный", 150),
-    ("Круассан", 180),
-]
+
+def load_menu_from_json() -> list[tuple[str, int]]:
+    """Загрузка меню из data/menu.json"""
+    with open(MENU_JSON, encoding="utf-8") as f:
+        data = json.load(f)
+    return [(item["name"], item["price"]) for item in data["items"]]
 
 
 def init_database() -> None:
     db = sqlite3.connect(DB_PATH)
     cursor = db.cursor()
 
-    # Создаём таблицы
     cursor.executescript(SCHEMA)
 
-    # Проверяем, есть ли уже меню
     cursor.execute("SELECT COUNT(*) FROM menu_items")
     if cursor.fetchone()[0] == 0:
+        menu_items = load_menu_from_json()
         cursor.executemany(
             "INSERT INTO menu_items (name, price) VALUES (?, ?)",
-            MENU_ITEMS
+            menu_items
         )
-        print(f"Добавлено {len(MENU_ITEMS)} позиций в меню")
+        print(f"Добавлено {len(menu_items)} позиций из {MENU_JSON}")
     else:
         print("Меню уже заполнено, пропускаю")
 
     db.commit()
     db.close()
-    print(f"База данных создана: {DB_PATH}")
+    print(f"База данных: {DB_PATH}")
 
 
 if __name__ == "__main__":

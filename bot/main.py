@@ -5,6 +5,7 @@ from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
 
 from bot.config import settings
+from bot.database import ensure_tables
 from bot.handlers import client_router, barista_router
 
 
@@ -16,6 +17,9 @@ logger = logging.getLogger(__name__)
 
 
 async def main() -> None:
+    settings.validate()
+    await ensure_tables()
+
     bot = Bot(token=settings.bot_token)
     dp = Dispatcher(storage=MemoryStorage())
 

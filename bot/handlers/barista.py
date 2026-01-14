@@ -1,3 +1,5 @@
+import logging
+
 from aiogram import Router, F, Bot
 from aiogram.filters import Command
 from aiogram.types import Message, CallbackQuery
@@ -6,6 +8,8 @@ from bot import database as db
 from bot.config import settings
 from bot.models import OrderStatus
 from bot.keyboards import barista_orders_keyboard, barista_order_detail_keyboard
+
+logger = logging.getLogger(__name__)
 
 
 router = Router(name="barista")
@@ -96,11 +100,15 @@ async def change_status(callback: CallbackQuery, bot: Bot) -> None:
     order_id = int(parts[2])
     new_status = OrderStatus(parts[3])
 
+    old_order = await db.get_order(order_id)
     order = await db.update_order_status(order_id, new_status)
 
     if not order:
         await callback.answer("Заказ не найден")
         return
+
+    old_status = old_order.status.value if old_order else "unknown"
+    logger.info(f"[Barista] #{order_id} статус: {old_status} -> {new_status.value}")
 
     # уведомление клиенту при статусе READY
     if new_status == OrderStatus.READY:

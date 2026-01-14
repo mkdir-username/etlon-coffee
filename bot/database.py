@@ -7,9 +7,36 @@ from bot.models import MenuItem, Order, OrderItem, OrderStatus
 
 DB_PATH = Path(__file__).parent.parent / "etlon.db"
 
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS menu_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    price INTEGER NOT NULL,
+    available INTEGER DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS orders (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    user_name TEXT NOT NULL,
+    items TEXT NOT NULL,
+    total INTEGER NOT NULL,
+    pickup_time TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+"""
+
 
 async def get_db() -> aiosqlite.Connection:
     return await aiosqlite.connect(DB_PATH)
+
+
+async def ensure_tables() -> None:
+    """Создает таблицы, если не существуют (idempotent)"""
+    async with await get_db() as db:
+        await db.executescript(SCHEMA)
+        await db.commit()
 
 
 # ===== MENU =====

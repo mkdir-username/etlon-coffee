@@ -18,5 +18,10 @@ class Settings(BaseSettings):
     def is_barista(self, user_id: int) -> bool:
         return user_id in self.barista_id_list
 
+    def validate(self) -> None:
+        """Проверка обязательных переменных при старте"""
+        if not self.bot_token:
+            raise ValueError("BOT_TOKEN не задан в .env")
+
 
 settings = Settings()
