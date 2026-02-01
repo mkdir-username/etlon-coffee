@@ -2,35 +2,40 @@ import asyncio
 import json
 import logging
 import sys
+from typing import Any
 
 from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
 
 from bot.config import settings
-from bot.database import ensure_tables, init_default_sizes, init_modifiers
+from bot.database import ensure_tables, init_default_sizes, init_modifiers, close_db
 from bot.handlers import client_router, barista_router
 
 
-def setup_logging():
+class JsonFormatter(logging.Formatter):
+    """JSON formatter для структурированного логирования."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        log_obj: dict[str, Any] = {
+            "timestamp": self.formatTime(record, "%H:%M:%S"),
+            "level": record.levelname,
+            "logger": record.name,
+            "message": record.getMessage(),
+        }
+        for attr in ("user_id", "order_id", "state", "item_id", "action"):
+            if hasattr(record, attr):
+                log_obj[attr] = getattr(record, attr)
+        if record.exc_info:
+            log_obj["exception"] = self.formatException(record.exc_info)
+        return json.dumps(log_obj, ensure_ascii=False)
+
+
+def setup_logging() -> None:
     """Настройка логирования для ИИ-агента: JSON в prod, text в dev"""
     level = getattr(logging, settings.log_level.upper(), logging.INFO)
 
+    formatter: logging.Formatter
     if settings.log_format == "json":
-        class JsonFormatter(logging.Formatter):
-            def format(self, record):
-                log_obj = {
-                    "timestamp": self.formatTime(record, "%H:%M:%S"),
-                    "level": record.levelname,
-                    "logger": record.name,
-                    "message": record.getMessage(),
-                }
-                # Structured context
-                for attr in ("user_id", "order_id", "state", "item_id", "action"):
-                    if hasattr(record, attr):
-                        log_obj[attr] = getattr(record, attr)
-                if record.exc_info:
-                    log_obj["exception"] = self.formatException(record.exc_info)
-                return json.dumps(log_obj, ensure_ascii=False)
         formatter = JsonFormatter()
     else:
         formatter = logging.Formatter(
@@ -70,6 +75,7 @@ async def main() -> None:
     try:
         await dp.start_polling(bot, allowed_updates=["message", "callback_query"])
     finally:
+        await close_db()
         await bot.session.close()
 
 

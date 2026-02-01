@@ -7,7 +7,7 @@ from aiogram.types import Message, CallbackQuery, InaccessibleMessage
 
 from bot import database as db
 from bot.config import settings
-from bot.models import OrderStatus
+from bot.models import Order, OrderStatus
 from bot.keyboards import (
     barista_orders_keyboard,
     barista_order_detail_keyboard,
@@ -122,7 +122,7 @@ async def show_order_detail(callback: CallbackQuery) -> None:
     )
 
 
-def _format_barista_order_detail(order) -> str:
+def _format_barista_order_detail(order: Order) -> str:
     """Форматирует детали заказа для баристы с модификаторами"""
     text = f"Заказ #{order.id}\n"
     text += f"Статус: {order.status.display_name}\n"

@@ -1,3 +1,5 @@
+from typing import Any
+
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from bot.models import MenuItem, CartItem, Order, OrderStatus
@@ -7,7 +9,7 @@ def size_keyboard(
     menu_item_id: int,
     item_name: str,
     base_price: int,
-    sizes: list[dict]
+    sizes: list[dict[str, Any]]
 ) -> InlineKeyboardMarkup:
     """
     Клавиатура выбора размера напитка.
@@ -42,7 +44,7 @@ MODIFIER_CATEGORY_NAMES = {
 def modifiers_keyboard(
     menu_item_id: int,
     size: str | None,
-    modifiers: list[dict],
+    modifiers: list[dict[str, Any]],
     selected_ids: list[int]
 ) -> InlineKeyboardMarkup:
     """
@@ -58,7 +60,7 @@ def modifiers_keyboard(
     size_str = size or "none"
 
     # Группируем по категориям
-    by_category: dict[str, list[dict]] = {}
+    by_category: dict[str, list[dict[str, Any]]] = {}
     for mod in modifiers:
         cat = mod["category"]
         if cat not in by_category:

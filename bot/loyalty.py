@@ -14,7 +14,7 @@ MAX_REDEEM_PERCENT = 30       # Максимум 30% заказа можно о�
 STAMPS_FOR_FREE_DRINK = 6     # 6 штампов = бесплатный напиток
 
 
-async def get_or_create_loyalty(user_id: int) -> dict:
+async def get_or_create_loyalty(user_id: int) -> dict[str, int]:
     """
     Получить или создать запись лояльности.
     Returns:
@@ -237,7 +237,7 @@ async def refund_points(user_id: int, order_id: int) -> int:
             return 0
 
         # amount в redemption отрицательный, берём модуль
-        redeemed_amount = abs(row[0])
+        redeemed_amount: int = abs(row[0])
 
         if redeemed_amount <= 0:
             return 0
@@ -276,7 +276,7 @@ async def refund_points(user_id: int, order_id: int) -> int:
             raise
 
 
-async def get_points_history(user_id: int, limit: int = 10) -> list[dict]:
+async def get_points_history(user_id: int, limit: int = 10) -> list[dict[str, str | int | None]]:
     """Получить историю операций с баллами."""
     async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute(

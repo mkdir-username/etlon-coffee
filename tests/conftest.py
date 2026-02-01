@@ -62,7 +62,8 @@ async def test_db(temp_db_path: Path, monkeypatch):
 
     yield temp_db_path
 
-    # Cleanup
+    # Cleanup: закрыть соединение и сбросить пул
+    await db.close_db()
     if temp_db_path.exists():
         temp_db_path.unlink()
 

@@ -169,7 +169,7 @@ async def add_to_cart(callback: CallbackQuery, state: FSMContext) -> None:
         extra={
             "user_id": callback.from_user.id,
             "item_id": item_id,
-            "name": item.name,
+            "item_name": item.name,
             "quantity": cart[-1]["quantity"]
         }
     )
@@ -299,7 +299,7 @@ async def select_size(callback: CallbackQuery, state: FSMContext) -> None:
         extra={
             "user_id": callback.from_user.id,
             "item_id": menu_item_id,
-            "name": item.name,
+            "item_name": item.name,
             "size": size,
             "price": final_price
         }
@@ -468,7 +468,7 @@ async def modifiers_done(callback: CallbackQuery, state: FSMContext) -> None:
         extra={
             "user_id": callback.from_user.id,
             "item_id": menu_item_id,
-            "name": item.name,
+            "item_name": item.name,
             "size": size,
             "modifier_ids": selected,
             "modifiers_price": modifiers_price,
@@ -632,7 +632,7 @@ def _parse_cart_key(cart_key: str) -> tuple[int, str | None, list[int]]:
     return item_id, size, modifier_ids
 
 
-def _cart_item_matches(cart_item: dict, item_id: int, size: str | None, modifier_ids: list[int]) -> bool:
+def _cart_item_matches(cart_item: dict[str, Any], item_id: int, size: str | None, modifier_ids: list[int]) -> bool:
     """Проверяет соответствие позиции корзины ключу"""
     if cart_item["menu_item_id"] != item_id:
         return False
@@ -855,7 +855,7 @@ def _format_order_summary(items: list[OrderItem]) -> str:
     return result
 
 
-async def _notify_baristas(bot: Bot, order, items: list[OrderItem]) -> None:
+async def _notify_baristas(bot: Bot, order: Order, items: list[OrderItem]) -> None:
     """
     Уведомляет всех баристов о новом заказе.
     Не блокирует создание заказа при ошибках.
@@ -1270,7 +1270,7 @@ def _status_emoji(status: OrderStatus) -> str:
     }.get(status, "")
 
 
-def _format_history_list(orders: list, page: int, total_pages: int) -> str:
+def _format_history_list(orders: list[Order], page: int, total_pages: int) -> str:
     if not orders:
         return "У вас пока нет заказов.\n\nДля оформления: /start"
 
@@ -1289,7 +1289,7 @@ def _format_history_list(orders: list, page: int, total_pages: int) -> str:
     return text
 
 
-def _format_order_detail(order) -> str:
+def _format_order_detail(order: Order) -> str:
     date_str = order.created_at.strftime("%d.%m.%Y")
     text = f"Заказ #{order.id} от {date_str}\n\n"
     text += "Состав:\n"
