@@ -1,0 +1,9 @@
+services:
+  - type: worker
+    name: etlon-coffee-bot
+    runtime: docker
+    envVars:
+      - key: BOT_TOKEN
+        sync: false
+      - key: BARISTA_IDS
+        sync: false
