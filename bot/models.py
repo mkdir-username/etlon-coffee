@@ -31,11 +31,26 @@ class MenuItem(BaseModel):
     available: bool = True
 
 
+class Modifier(BaseModel):
+    id: int
+    name: str
+    category: str  # 'syrup', 'milk', 'extra'
+    price: int = 0
+    is_available: bool = True
+    sort_order: int = 0
+
+
 class OrderItem(BaseModel):
     menu_item_id: int
     name: str
     price: int
     quantity: int = 1
+    comment: str | None = None
+    size: str | None = None
+    size_name: str | None = None
+    modifier_ids: list[int] = []
+    modifier_names: list[str] = []
+    modifiers_price: int = 0
 
 
 class Order(BaseModel):
@@ -55,3 +70,9 @@ class CartItem(BaseModel):
     name: str
     price: int
     quantity: int = 1
+    comment: str | None = None
+    size: str | None = None
+    size_name: str | None = None
+    modifier_ids: list[int] = []
+    modifier_names: list[str] = []
+    modifiers_price: int = 0

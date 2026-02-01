@@ -5,6 +5,8 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     bot_token: str
     barista_ids: str = ""  # через запятую: "123,456"
+    log_level: str = "INFO"
+    log_format: str = "json"  # "json" | "text"
 
     class Config:
         env_file = Path(__file__).parent.parent / ".env"

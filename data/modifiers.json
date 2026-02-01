@@ -1,0 +1,19 @@
+{
+  "modifiers": [
+    {"name": "Ванильный сироп", "category": "syrup", "price": 50},
+    {"name": "Карамельный сироп", "category": "syrup", "price": 50},
+    {"name": "Кокосовый сироп", "category": "syrup", "price": 50},
+    {"name": "Овсяное молоко", "category": "milk", "price": 70},
+    {"name": "Миндальное молоко", "category": "milk", "price": 70},
+    {"name": "Кокосовое молоко", "category": "milk", "price": 70},
+    {"name": "Двойной эспрессо", "category": "extra", "price": 60},
+    {"name": "Взбитые сливки", "category": "extra", "price": 40}
+  ],
+  "sizes": {
+    "default": [
+      {"size": "S", "size_name": "Маленький 250мл", "price_diff": 0},
+      {"size": "M", "size_name": "Средний 350мл", "price_diff": 30},
+      {"size": "L", "size_name": "Большой 450мл", "price_diff": 50}
+    ]
+  }
+}
