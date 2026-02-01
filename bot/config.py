@@ -3,7 +3,7 @@ from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
-    bot_token: str
+    bot_token: str = ""
     barista_ids: str = ""  # через запятую: "123,456"
     log_level: str = "INFO"
     log_format: str = "json"  # "json" | "text"
@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     def is_barista(self, user_id: int) -> bool:
         return user_id in self.barista_id_list
 
-    def validate(self) -> None:
+    def check_required(self) -> None:
         """Проверка обязательных переменных при старте"""
         if not self.bot_token:
             raise ValueError("BOT_TOKEN не задан в .env")

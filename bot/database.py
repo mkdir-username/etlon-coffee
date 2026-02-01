@@ -1,5 +1,7 @@
 import json
 import logging
+from typing import Any
+
 import aiosqlite
 from datetime import datetime
 from pathlib import Path
@@ -225,7 +227,7 @@ async def create_order(
             raise
 
     return Order(
-        id=order_id,
+        id=order_id or 0,
         user_id=user_id,
         user_name=user_name,
         items=items,
@@ -303,7 +305,7 @@ async def get_user_orders(user_id: int, limit: int = 5, offset: int = 0) -> tupl
         return orders, total_count
 
 
-def _row_to_order(row: tuple) -> Order:
+def _row_to_order(row: Any) -> Order:
     items_data = json.loads(row[3])
     items = [OrderItem(**i) for i in items_data]
     return Order(
@@ -744,7 +746,7 @@ async def init_modifiers() -> None:
                 (mod_data["name"],)
             )
             row = await cursor.fetchone()
-            if row:
+            if row and row[0] is not None:
                 modifier_ids.append(row[0])
                 continue
 
@@ -753,7 +755,8 @@ async def init_modifiers() -> None:
                    VALUES (?, ?, ?)""",
                 (mod_data["name"], mod_data["category"], mod_data["price"])
             )
-            modifier_ids.append(cursor.lastrowid)
+            if cursor.lastrowid is not None:
+                modifier_ids.append(cursor.lastrowid)
             inserted_modifiers += 1
 
         # Получаем все menu_items

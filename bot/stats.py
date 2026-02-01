@@ -55,7 +55,8 @@ async def get_daily_stats(target_date: date) -> DailyStats:
             """,
             (date_str,)
         )
-        status_counts = dict(await cursor.fetchall())
+        rows = await cursor.fetchall()
+        status_counts: dict[str, int] = {str(row[0]): int(row[1]) for row in rows}
 
         total_orders = sum(status_counts.values())
         completed_orders = status_counts.get(OrderStatus.COMPLETED.value, 0)

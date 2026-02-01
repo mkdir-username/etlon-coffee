@@ -1,10 +1,11 @@
 import asyncio
 import html
 import logging
+from typing import Any
 
 from aiogram import Router, F, Bot
 from aiogram.filters import CommandStart, Command
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import Message, CallbackQuery, InaccessibleMessage
 from aiogram.fsm.context import FSMContext
 
 from bot import database as db
@@ -30,10 +31,23 @@ logger = logging.getLogger(__name__)
 router = Router(name="client")
 
 
+# ===== HELPERS =====
+
+def _get_editable_message(callback: CallbackQuery) -> Message | None:
+    """Возвращает сообщение если оно доступно для редактирования."""
+    if not callback.message:
+        return None
+    if isinstance(callback.message, InaccessibleMessage):
+        return None
+    return callback.message
+
+
 # ===== START =====
 
 @router.message(CommandStart())
 async def cmd_start(message: Message, state: FSMContext) -> None:
+    if not message.from_user:
+        return
     await state.clear()
     await state.set_state(OrderState.browsing_menu)
     await state.update_data(cart=[])
@@ -51,9 +65,16 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
 
 @router.callback_query(F.data.startswith("menu:"), OrderState.browsing_menu)
 async def add_to_cart(callback: CallbackQuery, state: FSMContext) -> None:
+    if not callback.data:
+        await callback.answer()
+        return
+    msg = _get_editable_message(callback)
+    if not msg:
+        await callback.answer("Сообщение недоступно")
+        return
+
     parts = callback.data.split(":")
     if parts[1] == "back":
-        # Возврат в меню из детали позиции
         return
 
     item_id = int(parts[1])
@@ -67,11 +88,9 @@ async def add_to_cart(callback: CallbackQuery, state: FSMContext) -> None:
         await callback.answer("Позиция недоступна")
         return
 
-    # Проверяем есть ли размеры
     sizes = await db.get_menu_item_sizes(item_id)
 
     if sizes:
-        # Показать выбор размера
         await state.update_data(selecting_item_id=item_id)
         await state.set_state(OrderState.selecting_size)
 
@@ -85,18 +104,16 @@ async def add_to_cart(callback: CallbackQuery, state: FSMContext) -> None:
             }
         )
 
-        await callback.message.edit_text(
+        await msg.edit_text(
             f"Выбери размер для {item.name}:",
             reply_markup=size_keyboard(item_id, item.name, item.price, sizes)
         )
         await callback.answer()
         return
 
-    # Нет размеров — проверяем модификаторы
     modifiers = await db.get_available_modifiers(item_id)
 
     if modifiers:
-        # Показать выбор модификаторов
         await state.update_data(
             selecting_item_id=item_id,
             selecting_size=None,
@@ -116,7 +133,7 @@ async def add_to_cart(callback: CallbackQuery, state: FSMContext) -> None:
             }
         )
 
-        await callback.message.edit_text(
+        await msg.edit_text(
             f"{item.name}\n"
             f"Цена: {item.price}₽\n\n"
             "Добавить что-нибудь?",
@@ -125,11 +142,9 @@ async def add_to_cart(callback: CallbackQuery, state: FSMContext) -> None:
         await callback.answer()
         return
 
-    # Нет модификаторов — добавить сразу
     data = await state.get_data()
-    cart: list[dict] = data.get("cart", [])
+    cart: list[dict[str, Any]] = data.get("cart", [])
 
-    # ищем в корзине (без размера и модификаторов)
     found = False
     for c in cart:
         if (c["menu_item_id"] == item_id
@@ -163,7 +178,7 @@ async def add_to_cart(callback: CallbackQuery, state: FSMContext) -> None:
     menu = await db.get_menu()
     favorite_ids = await db.get_user_favorite_ids(callback.from_user.id)
 
-    await callback.message.edit_reply_markup(
+    await msg.edit_reply_markup(
         reply_markup=menu_keyboard(menu, cart_items, favorite_ids)
     )
     await callback.answer(f"{item.name} добавлен")
@@ -174,9 +189,16 @@ async def add_to_cart(callback: CallbackQuery, state: FSMContext) -> None:
 @router.callback_query(F.data.startswith("size:"), OrderState.selecting_size)
 async def select_size(callback: CallbackQuery, state: FSMContext) -> None:
     """Обработка выбора размера напитка"""
+    if not callback.data:
+        await callback.answer()
+        return
+    msg = _get_editable_message(callback)
+    if not msg:
+        await callback.answer("Сообщение недоступно")
+        return
+
     parts = callback.data.split(":")
 
-    # size:back — вернуться в меню
     if parts[1] == "back":
         await state.set_state(OrderState.browsing_menu)
         await state.update_data(selecting_item_id=None)
@@ -186,18 +208,16 @@ async def select_size(callback: CallbackQuery, state: FSMContext) -> None:
         menu = await db.get_menu()
         favorite_ids = await db.get_user_favorite_ids(callback.from_user.id)
 
-        await callback.message.edit_text(
+        await msg.edit_text(
             "Выбери напитки из меню:",
             reply_markup=menu_keyboard(menu, cart, favorite_ids)
         )
         await callback.answer()
         return
 
-    # size:{menu_item_id}:{size}
     menu_item_id = int(parts[1])
     size = parts[2]
 
-    # Получаем данные размера
     sizes = await db.get_menu_item_sizes(menu_item_id)
     size_data = next((s for s in sizes if s["size"] == size), None)
 
@@ -214,14 +234,11 @@ async def select_size(callback: CallbackQuery, state: FSMContext) -> None:
         await callback.answer("Позиция недоступна")
         return
 
-    # Финальная цена с учетом размера
     final_price = item.price + size_data["price_diff"]
 
-    # Проверяем модификаторы
     modifiers = await db.get_available_modifiers(menu_item_id)
 
     if modifiers:
-        # Показать выбор модификаторов
         await state.update_data(
             selecting_item_id=menu_item_id,
             selecting_size=size,
@@ -243,7 +260,7 @@ async def select_size(callback: CallbackQuery, state: FSMContext) -> None:
         )
 
         size_display = f" ({size_data['size_name']})" if size else ""
-        await callback.message.edit_text(
+        await msg.edit_text(
             f"{item.name}{size_display}\n"
             f"Базовая цена: {final_price}₽\n\n"
             "Добавить что-нибудь?",
@@ -252,13 +269,11 @@ async def select_size(callback: CallbackQuery, state: FSMContext) -> None:
         await callback.answer()
         return
 
-    # Нет модификаторов — добавить сразу
     data = await state.get_data()
-    cart: list[dict] = data.get("cart", [])
+    cart_data: list[dict[str, Any]] = data.get("cart", [])
 
-    # Ищем позицию с тем же item_id, размером и без модификаторов
     found = False
-    for c in cart:
+    for c in cart_data:
         if (c["menu_item_id"] == menu_item_id
                 and c.get("size") == size
                 and not c.get("modifier_ids")):
@@ -267,7 +282,7 @@ async def select_size(callback: CallbackQuery, state: FSMContext) -> None:
             break
 
     if not found:
-        cart.append({
+        cart_data.append({
             "menu_item_id": item.id,
             "name": item.name,
             "price": final_price,
@@ -276,7 +291,7 @@ async def select_size(callback: CallbackQuery, state: FSMContext) -> None:
             "size_name": size_data["size_name"]
         })
 
-    await state.update_data(cart=cart, selecting_item_id=None)
+    await state.update_data(cart=cart_data, selecting_item_id=None)
     await state.set_state(OrderState.browsing_menu)
 
     logger.debug(
@@ -290,11 +305,11 @@ async def select_size(callback: CallbackQuery, state: FSMContext) -> None:
         }
     )
 
-    cart_items = [CartItem(**c) for c in cart]
+    cart_items = [CartItem(**c) for c in cart_data]
     menu = await db.get_menu()
     favorite_ids = await db.get_user_favorite_ids(callback.from_user.id)
 
-    await callback.message.edit_text(
+    await msg.edit_text(
         "Выбери напитки из меню:",
         reply_markup=menu_keyboard(menu, cart_items, favorite_ids)
     )
@@ -312,7 +327,14 @@ async def modifier_noop(callback: CallbackQuery) -> None:
 @router.callback_query(F.data.startswith("mod:toggle:"), OrderState.selecting_modifiers)
 async def toggle_modifier(callback: CallbackQuery, state: FSMContext) -> None:
     """Toggle модификатора в списке выбранных"""
-    # mod:toggle:{menu_item_id}:{size}:{modifier_id}
+    if not callback.data:
+        await callback.answer()
+        return
+    msg = _get_editable_message(callback)
+    if not msg:
+        await callback.answer("Сообщение недоступно")
+        return
+
     parts = callback.data.split(":")
     menu_item_id = int(parts[2])
     size_str = parts[3]
@@ -323,7 +345,6 @@ async def toggle_modifier(callback: CallbackQuery, state: FSMContext) -> None:
     data = await state.get_data()
     selected: list[int] = data.get("selected_modifiers", [])
 
-    # Toggle
     if modifier_id in selected:
         selected.remove(modifier_id)
         logger.debug(
@@ -347,7 +368,6 @@ async def toggle_modifier(callback: CallbackQuery, state: FSMContext) -> None:
 
     await state.update_data(selected_modifiers=selected)
 
-    # Обновить клавиатуру
     modifiers = await db.get_available_modifiers(menu_item_id)
     item = await db.get_menu_item(menu_item_id)
 
@@ -358,11 +378,10 @@ async def toggle_modifier(callback: CallbackQuery, state: FSMContext) -> None:
     size_display = f" ({data.get('selecting_size_name')})" if data.get("selecting_size_name") else ""
     base_price = data.get("selecting_price", item.price)
 
-    # Считаем сумму выбранных модификаторов
     selected_mods = [m for m in modifiers if m["id"] in selected]
     total_mod_price = sum(m["price"] for m in selected_mods)
 
-    await callback.message.edit_text(
+    await msg.edit_text(
         f"{item.name}{size_display}\n"
         f"Базовая цена: {base_price}₽\n"
         + (f"Модификаторы: +{total_mod_price}₽\n" if total_mod_price > 0 else "")
@@ -375,7 +394,14 @@ async def toggle_modifier(callback: CallbackQuery, state: FSMContext) -> None:
 @router.callback_query(F.data.startswith("mod:done:"), OrderState.selecting_modifiers)
 async def modifiers_done(callback: CallbackQuery, state: FSMContext) -> None:
     """Завершение выбора модификаторов — добавить в корзину"""
-    # mod:done:{menu_item_id}:{size}
+    if not callback.data:
+        await callback.answer()
+        return
+    msg = _get_editable_message(callback)
+    if not msg:
+        await callback.answer("Сообщение недоступно")
+        return
+
     parts = callback.data.split(":")
     menu_item_id = int(parts[2])
     size_str = parts[3]
@@ -392,7 +418,6 @@ async def modifiers_done(callback: CallbackQuery, state: FSMContext) -> None:
         await callback.answer("Позиция недоступна")
         return
 
-    # Получаем данные выбранных модификаторов
     modifier_names: list[str] = []
     modifiers_price = 0
 
@@ -401,12 +426,10 @@ async def modifiers_done(callback: CallbackQuery, state: FSMContext) -> None:
         modifier_names = [m["name"] for m in mods_data]
         modifiers_price = sum(m["price"] for m in mods_data)
 
-    # Финальная цена = base_price + modifiers_price
     final_price = base_price + modifiers_price
 
-    cart: list[dict] = data.get("cart", [])
+    cart: list[dict[str, Any]] = data.get("cart", [])
 
-    # Ищем позицию с тем же item_id, размером И модификаторами
     found = False
     sorted_selected = sorted(selected)
     for c in cart:
@@ -457,11 +480,10 @@ async def modifiers_done(callback: CallbackQuery, state: FSMContext) -> None:
     menu = await db.get_menu()
     favorite_ids = await db.get_user_favorite_ids(callback.from_user.id)
 
-    # Формируем сообщение
     size_suffix = f" ({size})" if size else ""
     mod_suffix = f" +{len(selected)} доп." if selected else ""
 
-    await callback.message.edit_text(
+    await msg.edit_text(
         "Выбери напитки из меню:",
         reply_markup=menu_keyboard(menu, cart_items, favorite_ids)
     )
@@ -471,7 +493,14 @@ async def modifiers_done(callback: CallbackQuery, state: FSMContext) -> None:
 @router.callback_query(F.data.startswith("mod:back:"), OrderState.selecting_modifiers)
 async def modifiers_back(callback: CallbackQuery, state: FSMContext) -> None:
     """Возврат из выбора модификаторов"""
-    # mod:back:{menu_item_id}
+    if not callback.data:
+        await callback.answer()
+        return
+    msg = _get_editable_message(callback)
+    if not msg:
+        await callback.answer("Сообщение недоступно")
+        return
+
     parts = callback.data.split(":")
     menu_item_id = int(parts[2])
 
@@ -480,19 +509,17 @@ async def modifiers_back(callback: CallbackQuery, state: FSMContext) -> None:
 
     item = await db.get_menu_item(menu_item_id)
     if not item:
-        # Возврат в меню
         await state.set_state(OrderState.browsing_menu)
         cart = [CartItem(**c) for c in data.get("cart", [])]
         menu = await db.get_menu()
         favorite_ids = await db.get_user_favorite_ids(callback.from_user.id)
-        await callback.message.edit_text(
+        await msg.edit_text(
             "Выбери напитки из меню:",
             reply_markup=menu_keyboard(menu, cart, favorite_ids)
         )
         await callback.answer()
         return
 
-    # Если был выбор размера — вернуться к размерам
     sizes = await db.get_menu_item_sizes(menu_item_id)
     if sizes and size is not None:
         await state.set_state(OrderState.selecting_size)
@@ -500,14 +527,13 @@ async def modifiers_back(callback: CallbackQuery, state: FSMContext) -> None:
             selecting_item_id=menu_item_id,
             selected_modifiers=[]
         )
-        await callback.message.edit_text(
+        await msg.edit_text(
             f"Выбери размер для {item.name}:",
             reply_markup=size_keyboard(menu_item_id, item.name, item.price, sizes)
         )
         await callback.answer()
         return
 
-    # Иначе — в меню
     await state.set_state(OrderState.browsing_menu)
     await state.update_data(
         selecting_item_id=None,
@@ -521,7 +547,7 @@ async def modifiers_back(callback: CallbackQuery, state: FSMContext) -> None:
     menu = await db.get_menu()
     favorite_ids = await db.get_user_favorite_ids(callback.from_user.id)
 
-    await callback.message.edit_text(
+    await msg.edit_text(
         "Выбери напитки из меню:",
         reply_markup=menu_keyboard(menu, cart, favorite_ids)
     )
@@ -532,6 +558,11 @@ async def modifiers_back(callback: CallbackQuery, state: FSMContext) -> None:
 
 @router.callback_query(F.data == "cart:show", OrderState.browsing_menu)
 async def show_cart(callback: CallbackQuery, state: FSMContext) -> None:
+    msg = _get_editable_message(callback)
+    if not msg:
+        await callback.answer("Сообщение недоступно")
+        return
+
     data = await state.get_data()
     cart = [CartItem(**c) for c in data.get("cart", [])]
 
@@ -544,17 +575,22 @@ async def show_cart(callback: CallbackQuery, state: FSMContext) -> None:
         return
 
     text = _format_cart_text(cart)
-    await callback.message.edit_text(text, reply_markup=cart_keyboard(cart), parse_mode="HTML")
+    await msg.edit_text(text, reply_markup=cart_keyboard(cart), parse_mode="HTML")
 
 
 @router.callback_query(F.data == "cart:back", OrderState.browsing_menu)
 async def cart_back_to_menu(callback: CallbackQuery, state: FSMContext) -> None:
+    msg = _get_editable_message(callback)
+    if not msg:
+        await callback.answer("Сообщение недоступно")
+        return
+
     data = await state.get_data()
     cart = [CartItem(**c) for c in data.get("cart", [])]
     menu = await db.get_menu()
     favorite_ids = await db.get_user_favorite_ids(callback.from_user.id)
 
-    await callback.message.edit_text(
+    await msg.edit_text(
         "Выбери напитки из меню:",
         reply_markup=menu_keyboard(menu, cart, favorite_ids)
     )
@@ -609,6 +645,10 @@ def _cart_item_matches(cart_item: dict, item_id: int, size: str | None, modifier
 
 @router.callback_query(F.data.startswith("cart:inc:"), OrderState.browsing_menu)
 async def cart_increase(callback: CallbackQuery, state: FSMContext) -> None:
+    if not callback.data:
+        await callback.answer()
+        return
+
     cart_key = callback.data.split(":", 2)[2]
     item_id, size, modifier_ids = _parse_cart_key(cart_key)
 
@@ -626,20 +666,26 @@ async def cart_increase(callback: CallbackQuery, state: FSMContext) -> None:
 
 @router.callback_query(F.data.startswith("cart:dec:"), OrderState.browsing_menu)
 async def cart_decrease(callback: CallbackQuery, state: FSMContext) -> None:
+    if not callback.data:
+        await callback.answer()
+        return
+    msg = _get_editable_message(callback)
+    if not msg:
+        await callback.answer("Сообщение недоступно")
+        return
+
     cart_key = callback.data.split(":", 2)[2]
     item_id, size, modifier_ids = _parse_cart_key(cart_key)
 
     data = await state.get_data()
     cart = data.get("cart", [])
 
-    # уменьшаем или удаляем
     new_cart = []
     for c in cart:
         if _cart_item_matches(c, item_id, size, modifier_ids):
             if c["quantity"] > 1:
                 c["quantity"] -= 1
                 new_cart.append(c)
-            # иначе не добавляем — удаляем
         else:
             new_cart.append(c)
 
@@ -648,19 +694,22 @@ async def cart_decrease(callback: CallbackQuery, state: FSMContext) -> None:
     if new_cart:
         await _update_cart_view(callback, new_cart)
     else:
-        # корзина опустела — возврат в меню
         menu = await db.get_menu()
         favorite_ids = await db.get_user_favorite_ids(callback.from_user.id)
-        await callback.message.edit_text(
+        await msg.edit_text(
             "Выбери напитки из меню:",
             reply_markup=menu_keyboard(menu, [], favorite_ids)
         )
 
 
-async def _update_cart_view(callback: CallbackQuery, cart_data: list[dict]) -> None:
+async def _update_cart_view(callback: CallbackQuery, cart_data: list[dict[str, Any]]) -> None:
+    msg = _get_editable_message(callback)
+    if not msg:
+        await callback.answer("Сообщение недоступно")
+        return
     cart = [CartItem(**c) for c in cart_data]
     text = _format_cart_text(cart)
-    await callback.message.edit_text(text, reply_markup=cart_keyboard(cart), parse_mode="HTML")
+    await msg.edit_text(text, reply_markup=cart_keyboard(cart), parse_mode="HTML")
 
 
 # ===== COMMENTS =====
@@ -671,6 +720,14 @@ MAX_COMMENT_LENGTH = 100
 @router.callback_query(F.data.startswith("cart:comment:"), OrderState.browsing_menu)
 async def start_comment(callback: CallbackQuery, state: FSMContext) -> None:
     """Начинает ввод комментария к позиции"""
+    if not callback.data:
+        await callback.answer()
+        return
+    msg = _get_editable_message(callback)
+    if not msg:
+        await callback.answer("Сообщение недоступно")
+        return
+
     cart_key = callback.data.split(":", 2)[2]
     item_id, size, modifier_ids = _parse_cart_key(cart_key)
 
@@ -691,7 +748,6 @@ async def start_comment(callback: CallbackQuery, state: FSMContext) -> None:
         await callback.answer("Позиция не найдена")
         return
 
-    # Сохраняем cart_key для идентификации позиции
     await state.update_data(commenting_cart_key=cart_key)
     await state.set_state(OrderState.entering_comment)
 
@@ -701,7 +757,7 @@ async def start_comment(callback: CallbackQuery, state: FSMContext) -> None:
         text += f"Текущий: {html.escape(current_comment)}\n\n"
     text += "Отправь /cancel чтобы отменить"
 
-    await callback.message.edit_text(text, parse_mode="HTML")
+    await msg.edit_text(text, parse_mode="HTML")
 
     logger.debug(
         "comment_started",
@@ -724,6 +780,9 @@ async def cancel_comment(message: Message, state: FSMContext) -> None:
 @router.message(OrderState.entering_comment)
 async def save_comment(message: Message, state: FSMContext) -> None:
     """Сохраняет комментарий к позиции"""
+    if not message.from_user or not message.text:
+        return
+
     comment = message.text.strip()
 
     if len(comment) > MAX_COMMENT_LENGTH:
@@ -870,6 +929,11 @@ async def _notify_baristas(bot: Bot, order, items: list[OrderItem]) -> None:
 
 @router.callback_query(F.data == "cart:checkout", OrderState.browsing_menu)
 async def checkout(callback: CallbackQuery, state: FSMContext) -> None:
+    msg = _get_editable_message(callback)
+    if not msg:
+        await callback.answer("Сообщение недоступно")
+        return
+
     data = await state.get_data()
     cart = data.get("cart", [])
 
@@ -889,7 +953,7 @@ async def checkout(callback: CallbackQuery, state: FSMContext) -> None:
     )
 
     await state.set_state(OrderState.selecting_time)
-    await callback.message.edit_text(
+    await msg.edit_text(
         "Когда заберёшь заказ?",
         reply_markup=pickup_time_keyboard()
     )
@@ -899,17 +963,26 @@ async def checkout(callback: CallbackQuery, state: FSMContext) -> None:
 
 @router.callback_query(F.data == "time:back", OrderState.selecting_time)
 async def time_back(callback: CallbackQuery, state: FSMContext) -> None:
+    msg = _get_editable_message(callback)
+    if not msg:
+        await callback.answer("Сообщение недоступно")
+        return
+
     await state.set_state(OrderState.browsing_menu)
     data = await state.get_data()
     cart = [CartItem(**c) for c in data.get("cart", [])]
-    await callback.message.edit_text("Корзина:", reply_markup=cart_keyboard(cart))
+    await msg.edit_text("Корзина:", reply_markup=cart_keyboard(cart))
 
 
 @router.callback_query(F.data.startswith("time:"), OrderState.selecting_time)
 async def select_time(callback: CallbackQuery, state: FSMContext) -> None:
+    if not callback.data:
+        await callback.answer()
+        return
+
     minutes = callback.data.split(":")[1]
     if minutes == "back":
-        return  # обработано выше
+        return
 
     pickup_time = f"через {minutes} мин"
     await state.update_data(pickup_time=pickup_time)
@@ -926,8 +999,13 @@ async def select_time(callback: CallbackQuery, state: FSMContext) -> None:
         max_redeem = loyalty.calculate_max_redeem(order_total, user_points)
 
         if max_redeem > 0:
+            msg = _get_editable_message(callback)
+            if not msg:
+                await callback.answer("Сообщение недоступно")
+                return
+
             await state.set_state(OrderState.applying_bonus)
-            await callback.message.edit_text(
+            await msg.edit_text(
                 f"У тебя {user_points} баллов\n\n"
                 f"Хочешь списать баллы?\n"
                 f"(1 балл = 1р скидки, макс. 30% от суммы)",
@@ -935,13 +1013,17 @@ async def select_time(callback: CallbackQuery, state: FSMContext) -> None:
             )
             return
 
-    # Если баллов нет или max_redeem = 0 — сразу к подтверждению
     await state.update_data(bonus_used=0)
     await _show_confirmation(callback, state)
 
 
 async def _show_confirmation(callback: CallbackQuery, state: FSMContext) -> None:
     """Показывает экран подтверждения заказа с учётом бонусов"""
+    msg = _get_editable_message(callback)
+    if not msg:
+        await callback.answer("Сообщение недоступно")
+        return
+
     await state.set_state(OrderState.confirming)
     data = await state.get_data()
     cart = [CartItem(**c) for c in data.get("cart", [])]
@@ -970,7 +1052,7 @@ async def _show_confirmation(callback: CallbackQuery, state: FSMContext) -> None
 
     text += f"\nЗабор: {pickup_time}"
 
-    await callback.message.edit_text(text, reply_markup=confirm_keyboard())
+    await msg.edit_text(text, reply_markup=confirm_keyboard())
 
 
 # ===== BONUS =====
@@ -989,6 +1071,9 @@ async def bonus_skip(callback: CallbackQuery, state: FSMContext) -> None:
 @router.callback_query(F.data.startswith("bonus:use:"), OrderState.applying_bonus)
 async def bonus_use(callback: CallbackQuery, state: FSMContext) -> None:
     """Пользователь выбрал фиксированную сумму баллов"""
+    if not callback.data:
+        await callback.answer()
+        return
     amount = int(callback.data.split(":")[2])
     await state.update_data(bonus_used=amount)
     logger.debug(
@@ -1021,14 +1106,24 @@ async def bonus_max(callback: CallbackQuery, state: FSMContext) -> None:
 
 @router.callback_query(F.data == "confirm:edit", OrderState.confirming)
 async def confirm_edit(callback: CallbackQuery, state: FSMContext) -> None:
+    msg = _get_editable_message(callback)
+    if not msg:
+        await callback.answer("Сообщение недоступно")
+        return
+
     await state.set_state(OrderState.browsing_menu)
     data = await state.get_data()
     cart = [CartItem(**c) for c in data.get("cart", [])]
-    await callback.message.edit_text("Корзина:", reply_markup=cart_keyboard(cart))
+    await msg.edit_text("Корзина:", reply_markup=cart_keyboard(cart))
 
 
 @router.callback_query(F.data == "confirm:yes", OrderState.confirming)
 async def confirm_order(callback: CallbackQuery, state: FSMContext, bot: Bot) -> None:
+    msg = _get_editable_message(callback)
+    if not msg:
+        await callback.answer("Сообщение недоступно")
+        return
+
     data = await state.get_data()
     cart_data = data.get("cart", [])
     pickup_time = data.get("pickup_time", "через 15 мин")
@@ -1156,7 +1251,7 @@ async def confirm_order(callback: CallbackQuery, state: FSMContext, bot: Bot) ->
             "/start — новый заказ"
         )
 
-    await callback.message.edit_text(confirmation_text)
+    await msg.edit_text(confirmation_text)
 
 
 # ===== HISTORY =====
@@ -1213,6 +1308,8 @@ def _format_order_detail(order) -> str:
 
 @router.message(Command("history"))
 async def cmd_history(message: Message, state: FSMContext) -> None:
+    if not message.from_user:
+        return
     user_id = message.from_user.id
     orders, total = await db.get_user_orders(user_id, limit=HISTORY_PAGE_SIZE, offset=0)
 
@@ -1235,6 +1332,14 @@ async def cmd_history(message: Message, state: FSMContext) -> None:
 
 @router.callback_query(F.data.startswith("history:page:"))
 async def history_page(callback: CallbackQuery, state: FSMContext) -> None:
+    if not callback.data:
+        await callback.answer()
+        return
+    msg = _get_editable_message(callback)
+    if not msg:
+        await callback.answer("Сообщение недоступно")
+        return
+
     page = int(callback.data.split(":")[2])
     user_id = callback.from_user.id
     offset = page * HISTORY_PAGE_SIZE
@@ -1252,11 +1357,19 @@ async def history_page(callback: CallbackQuery, state: FSMContext) -> None:
     text = _format_history_list(orders, page=page, total_pages=total_pages)
 
     await state.update_data(history_page=page)
-    await callback.message.edit_text(text, reply_markup=history_keyboard(orders, page=page, has_next=has_next))
+    await msg.edit_text(text, reply_markup=history_keyboard(orders, page=page, has_next=has_next))
 
 
 @router.callback_query(F.data.startswith("history:view:"))
 async def history_view_order(callback: CallbackQuery, state: FSMContext) -> None:
+    if not callback.data:
+        await callback.answer()
+        return
+    msg = _get_editable_message(callback)
+    if not msg:
+        await callback.answer("Сообщение недоступно")
+        return
+
     order_id = int(callback.data.split(":")[2])
     order = await db.get_order(order_id)
 
@@ -1268,7 +1381,6 @@ async def history_view_order(callback: CallbackQuery, state: FSMContext) -> None
         await callback.answer("Заказ не найден")
         return
 
-    # проверяем что заказ принадлежит пользователю
     if order.user_id != callback.from_user.id:
         logger.warning(
             "history_order_access_denied",
@@ -1283,7 +1395,7 @@ async def history_view_order(callback: CallbackQuery, state: FSMContext) -> None
     )
 
     text = _format_order_detail(order)
-    await callback.message.edit_text(
+    await msg.edit_text(
         text,
         reply_markup=order_detail_keyboard(order_id, order=order, user_id=callback.from_user.id)
     )
@@ -1291,6 +1403,11 @@ async def history_view_order(callback: CallbackQuery, state: FSMContext) -> None
 
 @router.callback_query(F.data == "history:back")
 async def history_back(callback: CallbackQuery, state: FSMContext) -> None:
+    msg = _get_editable_message(callback)
+    if not msg:
+        await callback.answer("Сообщение недоступно")
+        return
+
     data = await state.get_data()
     page = data.get("history_page", 0)
     user_id = callback.from_user.id
@@ -1307,7 +1424,7 @@ async def history_back(callback: CallbackQuery, state: FSMContext) -> None:
     has_next = offset + HISTORY_PAGE_SIZE < total
 
     text = _format_history_list(orders, page=page, total_pages=total_pages)
-    await callback.message.edit_text(text, reply_markup=history_keyboard(orders, page=page, has_next=has_next))
+    await msg.edit_text(text, reply_markup=history_keyboard(orders, page=page, has_next=has_next))
 
 
 # ===== ORDER CANCELLATION =====
@@ -1315,16 +1432,22 @@ async def history_back(callback: CallbackQuery, state: FSMContext) -> None:
 @router.callback_query(F.data.startswith("cancel:"))
 async def cancel_order(callback: CallbackQuery, bot: Bot) -> None:
     """Отмена заказа клиентом"""
+    if not callback.data:
+        await callback.answer()
+        return
+    msg = _get_editable_message(callback)
+    if not msg:
+        await callback.answer("Сообщение недоступно")
+        return
+
     order_id = int(callback.data.split(":")[1])
     user_id = callback.from_user.id
 
-    # Получаем заказ до отмены для уведомления
     order = await db.get_order(order_id)
 
     success, message = await db.cancel_order_by_client(order_id, user_id)
 
     if success:
-        # Возврат баллов при отмене
         refunded_points = await loyalty.refund_points(user_id, order_id)
 
         if refunded_points > 0:
@@ -1339,11 +1462,9 @@ async def cancel_order(callback: CallbackQuery, bot: Bot) -> None:
 
         await callback.answer(message)
 
-        # Уведомляем баристов
         if order:
             await _notify_baristas_cancellation(bot, order, refunded_points)
 
-        # Обновляем сообщение с новым статусом
         updated_order = await db.get_order(order_id)
         if updated_order:
             text = f"❌ Заказ #{order_id} отменён"
@@ -1353,7 +1474,7 @@ async def cancel_order(callback: CallbackQuery, bot: Bot) -> None:
 
             text += "\n\nЕсли хотите сделать новый заказ — /start"
 
-            await callback.message.edit_text(text)
+            await msg.edit_text(text)
     else:
         await callback.answer(message, show_alert=True)
 
@@ -1402,10 +1523,17 @@ async def _notify_baristas_cancellation(bot: Bot, order: Order, refunded_points:
 @router.callback_query(F.data.startswith("repeat:"))
 async def repeat_order(callback: CallbackQuery, state: FSMContext) -> None:
     """Повторить заказ — добавить позиции в корзину."""
+    if not callback.data:
+        await callback.answer()
+        return
+    msg = _get_editable_message(callback)
+    if not msg:
+        await callback.answer("Сообщение недоступно")
+        return
+
     order_id = int(callback.data.split(":")[1])
     user_id = callback.from_user.id
 
-    # проверяем владельца заказа
     order = await db.get_order(order_id)
     if not order or order.user_id != user_id:
         logger.warning(
@@ -1415,7 +1543,6 @@ async def repeat_order(callback: CallbackQuery, state: FSMContext) -> None:
         await callback.answer("Заказ не найден")
         return
 
-    # 1. Получить позиции с проверкой доступности
     items_for_repeat = await db.get_order_items_for_repeat(order_id)
 
     if not items_for_repeat:
@@ -1425,7 +1552,6 @@ async def repeat_order(callback: CallbackQuery, state: FSMContext) -> None:
     available_items = [i for i in items_for_repeat if i["is_available"]]
     unavailable_items = [i for i in items_for_repeat if not i["is_available"]]
 
-    # все недоступны
     if not available_items:
         logger.info(
             "repeat_order_all_unavailable",
@@ -1438,17 +1564,16 @@ async def repeat_order(callback: CallbackQuery, state: FSMContext) -> None:
         text += "\n/start - новый заказ\n/history - история заказов"
 
         await callback.answer("Все позиции недоступны", show_alert=True)
-        await callback.message.edit_text(text)
+        await msg.edit_text(text)
         return
 
-    # инициализируем/получаем корзину
     current_state = await state.get_state()
     if current_state != OrderState.browsing_menu:
         await state.set_state(OrderState.browsing_menu)
         await state.update_data(cart=[])
 
     data = await state.get_data()
-    cart: list[dict] = data.get("cart", [])
+    cart: list[dict[str, Any]] = data.get("cart", [])
 
     # 2. Добавить доступные в корзину (с модификаторами)
     added_names: list[str] = []
@@ -1506,11 +1631,10 @@ async def repeat_order(callback: CallbackQuery, state: FSMContext) -> None:
         text = "✅ Добавлено в корзину:\n"
         text += "\n".join(added_names)
 
-    # 5. Показать корзину
     cart_items = [CartItem(**c) for c in cart]
     text += f"\n\n{_format_cart_text(cart_items)}"
 
-    await callback.message.edit_text(
+    await msg.edit_text(
         text,
         reply_markup=cart_keyboard(cart_items),
         parse_mode="HTML"
@@ -1522,6 +1646,8 @@ async def repeat_order(callback: CallbackQuery, state: FSMContext) -> None:
 @router.message(Command("favorites"))
 async def cmd_favorites(message: Message) -> None:
     """Показывает список избранных позиций"""
+    if not message.from_user:
+        return
     user_id = message.from_user.id
     favorites = await db.get_favorites(user_id)
 
@@ -1549,6 +1675,10 @@ async def cmd_favorites(message: Message) -> None:
 @router.callback_query(F.data.startswith("fav:add:"))
 async def fav_add(callback: CallbackQuery) -> None:
     """Добавляет позицию в избранное"""
+    if not callback.data:
+        await callback.answer()
+        return
+
     item_id = int(callback.data.split(":")[2])
     user_id = callback.from_user.id
 
@@ -1576,6 +1706,14 @@ async def fav_add(callback: CallbackQuery) -> None:
 @router.callback_query(F.data.startswith("fav:remove:"))
 async def fav_remove(callback: CallbackQuery) -> None:
     """Удаляет позицию из избранного"""
+    if not callback.data:
+        await callback.answer()
+        return
+    msg = _get_editable_message(callback)
+    if not msg:
+        await callback.answer("Сообщение недоступно")
+        return
+
     item_id = int(callback.data.split(":")[2])
     user_id = callback.from_user.id
 
@@ -1591,16 +1729,15 @@ async def fav_remove(callback: CallbackQuery) -> None:
         )
         await callback.answer(f"{item_name} убран из избранного")
 
-        # обновляем список избранного
         favorites = await db.get_favorites(user_id)
         if favorites:
             text = "Избранное:\n\n"
             for fav in favorites:
                 text += f"* {fav.name} — {fav.price}р\n"
             text += "\nДля нового заказа: /start"
-            await callback.message.edit_text(text, reply_markup=favorites_keyboard(favorites))
+            await msg.edit_text(text, reply_markup=favorites_keyboard(favorites))
         else:
-            await callback.message.edit_text(
+            await msg.edit_text(
                 "Избранное пусто.\n\n"
                 "Добавляйте позиции в избранное через меню.\n"
                 "Для нового заказа: /start"
@@ -1612,6 +1749,10 @@ async def fav_remove(callback: CallbackQuery) -> None:
 @router.callback_query(F.data.startswith("fav:order:"))
 async def fav_order(callback: CallbackQuery, state: FSMContext) -> None:
     """Добавляет позицию из избранного в корзину"""
+    if not callback.data:
+        await callback.answer()
+        return
+
     item_id = int(callback.data.split(":")[2])
     user_id = callback.from_user.id
 
@@ -1624,16 +1765,14 @@ async def fav_order(callback: CallbackQuery, state: FSMContext) -> None:
         await callback.answer("Позиция недоступна")
         return
 
-    # инициализируем состояние если нужно
     current_state = await state.get_state()
     if current_state != OrderState.browsing_menu:
         await state.set_state(OrderState.browsing_menu)
         await state.update_data(cart=[])
 
     data = await state.get_data()
-    cart: list[dict] = data.get("cart", [])
+    cart: list[dict[str, Any]] = data.get("cart", [])
 
-    # ищем в корзине
     found = False
     for c in cart:
         if c["menu_item_id"] == item_id:
@@ -1662,6 +1801,11 @@ async def fav_order(callback: CallbackQuery, state: FSMContext) -> None:
 @router.callback_query(F.data == "fav:start")
 async def fav_start(callback: CallbackQuery, state: FSMContext) -> None:
     """Переход в меню из избранного"""
+    msg = _get_editable_message(callback)
+    if not msg:
+        await callback.answer("Сообщение недоступно")
+        return
+
     await state.clear()
     await state.set_state(OrderState.browsing_menu)
     await state.update_data(cart=[])
@@ -1669,7 +1813,7 @@ async def fav_start(callback: CallbackQuery, state: FSMContext) -> None:
     menu = await db.get_menu()
     favorite_ids = await db.get_user_favorite_ids(callback.from_user.id)
 
-    await callback.message.edit_text(
+    await msg.edit_text(
         "Выбери напитки из меню:",
         reply_markup=menu_keyboard(menu, [], favorite_ids)
     )
@@ -1692,6 +1836,8 @@ def _format_money(value: int) -> str:
 @router.message(Command("profile"))
 async def cmd_profile(message: Message) -> None:
     """Показать профиль пользователя."""
+    if not message.from_user:
+        return
     user_id = message.from_user.id
 
     data = await loyalty.get_or_create_loyalty(user_id)

@@ -53,7 +53,7 @@ logger = logging.getLogger(__name__)
 
 
 async def main() -> None:
-    settings.validate()
+    settings.check_required()
     setup_logging()
     await ensure_tables()
     await init_default_sizes()

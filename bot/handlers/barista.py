@@ -3,7 +3,7 @@ from datetime import date, timedelta
 
 from aiogram import Router, F, Bot
 from aiogram.filters import Command, CommandObject
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import Message, CallbackQuery, InaccessibleMessage
 
 from bot import database as db
 from bot.config import settings
@@ -25,10 +25,21 @@ def _is_barista(user_id: int) -> bool:
     return settings.is_barista(user_id)
 
 
+def _get_editable_message(callback: CallbackQuery) -> Message | None:
+    """Возвращает сообщение если оно доступно для редактирования."""
+    if not callback.message:
+        return None
+    if isinstance(callback.message, InaccessibleMessage):
+        return None
+    return callback.message
+
+
 # ===== BARISTA PANEL =====
 
 @router.message(Command("barista"))
 async def cmd_barista(message: Message) -> None:
+    if not message.from_user:
+        return
     if not _is_barista(message.from_user.id):
         logger.warning(
             "unauthorized_access",
@@ -53,9 +64,13 @@ async def refresh_orders(callback: CallbackQuery) -> None:
     if not _is_barista(callback.from_user.id):
         await callback.answer("Нет доступа")
         return
+    msg = _get_editable_message(callback)
+    if not msg:
+        await callback.answer("Сообщение недоступно")
+        return
 
     orders = await db.get_active_orders()
-    await callback.message.edit_text(
+    await msg.edit_text(
         "Панель баристы\n\nАктивные заказы:",
         reply_markup=barista_orders_keyboard(orders)
     )
@@ -67,9 +82,13 @@ async def back_to_list(callback: CallbackQuery) -> None:
     if not _is_barista(callback.from_user.id):
         await callback.answer("Нет доступа")
         return
+    msg = _get_editable_message(callback)
+    if not msg:
+        await callback.answer("Сообщение недоступно")
+        return
 
     orders = await db.get_active_orders()
-    await callback.message.edit_text(
+    await msg.edit_text(
         "Панель баристы\n\nАктивные заказы:",
         reply_markup=barista_orders_keyboard(orders)
     )
@@ -79,6 +98,13 @@ async def back_to_list(callback: CallbackQuery) -> None:
 async def show_order_detail(callback: CallbackQuery) -> None:
     if not _is_barista(callback.from_user.id):
         await callback.answer("Нет доступа")
+        return
+    if not callback.data:
+        await callback.answer()
+        return
+    msg = _get_editable_message(callback)
+    if not msg:
+        await callback.answer("Сообщение недоступно")
         return
 
     order_id = int(callback.data.split(":")[2])
@@ -90,7 +116,7 @@ async def show_order_detail(callback: CallbackQuery) -> None:
 
     text = _format_barista_order_detail(order)
 
-    await callback.message.edit_text(
+    await msg.edit_text(
         text,
         reply_markup=barista_order_detail_keyboard(order)
     )
@@ -121,6 +147,13 @@ async def change_status(callback: CallbackQuery, bot: Bot) -> None:
     if not _is_barista(callback.from_user.id):
         await callback.answer("Нет доступа")
         return
+    if not callback.data:
+        await callback.answer()
+        return
+    msg = _get_editable_message(callback)
+    if not msg:
+        await callback.answer("Сообщение недоступно")
+        return
 
     parts = callback.data.split(":")
     order_id = int(parts[2])
@@ -144,7 +177,6 @@ async def change_status(callback: CallbackQuery, bot: Bot) -> None:
         }
     )
 
-    # уведомление клиенту при статусе READY
     if new_status == OrderStatus.READY:
         try:
             await bot.send_message(
@@ -169,10 +201,9 @@ async def change_status(callback: CallbackQuery, bot: Bot) -> None:
 
     await callback.answer(f"Статус: {new_status.display_name}")
 
-    # обновляем детали заказа
     text = _format_barista_order_detail(order)
 
-    await callback.message.edit_text(
+    await msg.edit_text(
         text,
         reply_markup=barista_order_detail_keyboard(order)
     )
@@ -182,6 +213,8 @@ async def change_status(callback: CallbackQuery, bot: Bot) -> None:
 
 @router.message(Command("stats"))
 async def cmd_stats(message: Message, command: CommandObject) -> None:
+    if not message.from_user:
+        return
     if not _is_barista(message.from_user.id):
         logger.warning(
             "unauthorized_access",
@@ -204,8 +237,8 @@ async def cmd_stats(message: Message, command: CommandObject) -> None:
                 "period": "week"
             }
         )
-        stats = await get_weekly_stats(days=7)
-        await message.answer(format_weekly_stats(stats))
+        weekly_stats = await get_weekly_stats(days=7)
+        await message.answer(format_weekly_stats(weekly_stats))
         return
 
     target_date = date.today()
@@ -220,8 +253,8 @@ async def cmd_stats(message: Message, command: CommandObject) -> None:
         }
     )
 
-    stats = await get_daily_stats(target_date)
-    await message.answer(format_stats(stats))
+    daily_stats = await get_daily_stats(target_date)
+    await message.answer(format_stats(daily_stats))
 
 
 # ===== MENU MANAGEMENT =====
@@ -236,6 +269,8 @@ def _menu_manage_text() -> str:
 
 @router.message(Command("menu_manage"))
 async def cmd_menu_manage(message: Message) -> None:
+    if not message.from_user:
+        return
     if not _is_barista(message.from_user.id):
         logger.warning(
             "unauthorized_access",
@@ -260,9 +295,13 @@ async def refresh_menu_manage(callback: CallbackQuery) -> None:
     if not _is_barista(callback.from_user.id):
         await callback.answer("Нет доступа")
         return
+    msg = _get_editable_message(callback)
+    if not msg:
+        await callback.answer("Сообщение недоступно")
+        return
 
     items = await db.get_all_menu_items()
-    await callback.message.edit_text(
+    await msg.edit_text(
         _menu_manage_text(),
         reply_markup=menu_manage_keyboard(items)
     )
@@ -273,6 +312,13 @@ async def refresh_menu_manage(callback: CallbackQuery) -> None:
 async def toggle_menu_item(callback: CallbackQuery) -> None:
     if not _is_barista(callback.from_user.id):
         await callback.answer("Нет доступа")
+        return
+    if not callback.data:
+        await callback.answer()
+        return
+    msg = _get_editable_message(callback)
+    if not msg:
+        await callback.answer("Сообщение недоступно")
         return
 
     item_id = int(callback.data.split(":")[1])
@@ -294,7 +340,7 @@ async def toggle_menu_item(callback: CallbackQuery) -> None:
     )
 
     items = await db.get_all_menu_items()
-    await callback.message.edit_reply_markup(
+    await msg.edit_reply_markup(
         reply_markup=menu_manage_keyboard(items)
     )
     await callback.answer(f"{item.name}: {new_status}")
